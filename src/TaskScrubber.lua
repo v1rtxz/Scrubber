@@ -1,25 +1,20 @@
---!strict
+--!nonstrict
+
 local TaskScrubber = {}
 TaskScrubber.__index = TaskScrubber
 
 export type CleanupMethod = string | boolean | ((item: any) -> ())
+type Destructor = (any) -> ()
 
-type TaskEntry = {
-	item: any,
-	method: CleanupMethod,
-}
-
-local TYPE_DEFAULTS: { [string]: CleanupMethod } = {
+local TYPE_DEFAULTS: { [string]: string } = {
 	["RBXScriptConnection"] = "Disconnect",
 	["Instance"] = "Destroy",
 	["thread"] = "cancel",
-	["function"] = true,
 }
 
 export type TaskScrubber = {
-	_tasks: { [string | number]: TaskEntry },
-	_keys: { [any]: string | number },
-	_nextId: number,
+	_queue: { any },
+	_keyedIndices: { [any]: number },
 	IsCleaning: boolean,
 
 	Add: (self: TaskScrubber, taskItem: any, customMethod: CleanupMethod?, key: any?, silentOverwrite: boolean?) -> any,
@@ -32,66 +27,65 @@ export type TaskScrubber = {
 
 function TaskScrubber.new(): TaskScrubber
 	local self = {
-		_tasks = {},
-		_keys = {},
-		_nextId = 0,
+		_queue = {},
+		_keyedIndices = {},
 		IsCleaning = false,
 	}
 	return setmetatable(self, TaskScrubber) :: any
 end
 
-local function ExecuteTask(taskItem: any, method: CleanupMethod)
+local function ResolveDestructor(taskItem: any, method: CleanupMethod?): Destructor
 	if type(method) == "function" then
-		local success, err = pcall(method :: any, taskItem)
-		if not success then
-			warn("[TaskScrubber] Custom cleanup failed: " .. tostring(err))
-		end
-		return
+		return method :: Destructor
 	end
 
 	if type(taskItem) == "thread" then
-		local success, err = pcall(task.cancel, taskItem)
-		if not success and err then
-			warn("[TaskScrubber] Thread cancel failed: " .. tostring(err))
+		return function(item)
+			task.cancel(item :: thread)
 		end
-		return
 	end
 
 	if typeof(taskItem) == "RBXScriptConnection" then
-		local success, err = pcall(function()
-			(taskItem :: RBXScriptConnection):Disconnect()
-		end)
-		if not success and err then
-			warn("[TaskScrubber] Connection disconnect failed: " .. tostring(err))
+		return function(item)
+			(item :: RBXScriptConnection):Disconnect()
 		end
-		return
 	end
 
-	if method == true then
-		if type(taskItem) == "function" then
-			local success, err = pcall(taskItem :: any)
-			if not success then
-				warn("[TaskScrubber] Function cleanup failed: " .. tostring(err))
-			end
+	if method == true and type(taskItem) == "function" then
+		return function(item)
+			(item :: () -> ())()
 		end
-		return
 	end
 
 	if type(method) == "string" then
-		if type(taskItem) == "table" or typeof(taskItem) == "Instance" then
-			local methodFunc = (taskItem :: any)[method]
-			if type(methodFunc) == "function" then
-				local success, err = pcall(function()
-					(methodFunc :: any)(taskItem)
-				end)
-				if not success and err then
-					warn("[TaskScrubber] Method '" .. method .. "' failed: " .. tostring(err))
+		local methodName = method :: string
+		return function(item)
+			if type(item) == "table" or typeof(item) == "Instance" then
+				local func = (item :: any)[methodName]
+				if type(func) == "function" then
+					func(item)
 				end
-			else
-				warn("[TaskScrubber] Method '" .. method .. "' does not exist on task item of type " .. typeof(taskItem))
 			end
-		else
-			warn("[TaskScrubber] Cannot call method '" .. method .. "' on non-table task item.")
+		end
+	end
+
+	local defaultMethod = TYPE_DEFAULTS[typeof(taskItem)]
+	if defaultMethod == "Disconnect" then
+		return function(item)
+			(item :: RBXScriptConnection):Disconnect()
+		end
+	elseif defaultMethod == "cancel" then
+		return function(item)
+			task.cancel(item :: thread)
+		end
+	end
+
+	return function(item)
+		if type(item) == "table" or typeof(item) == "Instance" then
+			local destroyFunc = (item :: any)["Destroy"]
+			if type(destroyFunc) == "function" then
+				destroyFunc(item)
+			end
 		end
 	end
 end
@@ -101,63 +95,69 @@ function TaskScrubber.Add(self: TaskScrubber, taskItem: any, customMethod: Clean
 		return nil
 	end
 
-	local cleanupMethod: CleanupMethod
-	if customMethod ~= nil then
-		cleanupMethod = customMethod
-	else
-		cleanupMethod = TYPE_DEFAULTS[typeof(taskItem)] or "Destroy"
-	end
+	local destructor = ResolveDestructor(taskItem, customMethod)
 
 	if self.IsCleaning then
-		warn("[TaskScrubber] Add() was called while cleanup is running, so the task was executed immediately instead of being tracked.")
-		ExecuteTask(taskItem, cleanupMethod)
+		pcall(destructor :: any, taskItem)
 		return taskItem
 	end
+
 	if key ~= nil then
-		local existingId = self._keys[key]
-		if existingId ~= nil then
-			if silentOverwrite then
-				self._tasks[existingId] = nil :: any
-			else
-				self:Remove(key)
+		local existingIndex = self._keyedIndices[key]
+		if existingIndex ~= nil then
+			local existingItem = self._queue[existingIndex]
+			local existingDestructor = self._queue[existingIndex + 1]
+
+			if existingItem ~= false and existingDestructor then
+				if not silentOverwrite then
+					pcall(existingDestructor :: any, existingItem)
+				else
+					if type(existingItem) == "thread" then
+						pcall(task.cancel, existingItem)
+					end
+				end
 			end
+
+			self._queue[existingIndex] = taskItem
+			self._queue[existingIndex + 1] = destructor
+			return taskItem
+		else
+			local index = #self._queue + 1
+			self._queue[index] = taskItem
+			self._queue[index + 1] = destructor
+			self._keyedIndices[key] = index
+			return taskItem
 		end
 	end
 
-	self._nextId += 1
-	local taskId: string | number = self._nextId
-
-	self._tasks[taskId] = {
-		item = taskItem,
-		method = cleanupMethod,
-	}
-
-	if key ~= nil then
-		self._keys[key] = taskId
-	end
+	local index = #self._queue + 1
+	self._queue[index] = taskItem
+	self._queue[index + 1] = destructor
 
 	return taskItem
 end
 
 function TaskScrubber.Get(self: TaskScrubber, key: any): any?
-	local taskId = self._keys[key]
-	if taskId ~= nil then
-		local entry = self._tasks[taskId]
-		if entry ~= nil then
-			return entry.item
-		end
+	local index = self._keyedIndices[key]
+	if index ~= nil then
+		local item = self._queue[index]
+		return item ~= false and item or nil
 	end
 	return nil
 end
 
 function TaskScrubber.Remove(self: TaskScrubber, key: any)
-	local taskId = self._keys[key]
-	if taskId ~= nil then
-		self._keys[key] = nil
-		local entry = self._tasks[taskId]
-		if entry ~= nil then
-			self._tasks[taskId] = nil :: any
-			ExecuteTask(entry.item, entry.method :: CleanupMethod)
+	local index = self._keyedIndices[key]
+	if index ~= nil then
+		self._keyedIndices[key] = nil
+		local item = self._queue[index]
+		local destructor = self._queue[index + 1]
+
+		self._queue[index] = false
+		self._queue[index + 1] = false
+
+		if destructor and item ~= false then
+			pcall(destructor :: any, item)
 		end
 	end
 end
@@ -180,16 +180,18 @@ function TaskScrubber.Cleanup(self: TaskScrubber)
 	end
 	self.IsCleaning = true
 
-	local tasksToClean = self._tasks
-	self._tasks = {}
-	table.clear(self._keys)
-	self._nextId = 0
+	local queue = self._queue
+	self._queue = {}
+	table.clear(self._keyedIndices)
 
-	for _, entry in pairs(tasksToClean) do
-		local taskEntry = entry :: TaskEntry?
-		if taskEntry ~= nil then
-			ExecuteTask(taskEntry.item, taskEntry.method :: CleanupMethod)
+	local i = 1
+	while queue[i] ~= nil do
+		local item = queue[i]
+		local destructor = queue[i + 1]
+		if item ~= false and destructor then
+			pcall(destructor :: any, item)
 		end
+		i += 2
 	end
 
 	self.IsCleaning = false
