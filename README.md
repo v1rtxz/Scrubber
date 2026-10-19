@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/license-MIT-1f6feb)](https://github.com/v1rtxz/Scrubber/blob/main/LICENSE)
 [![Luau](https://img.shields.io/badge/language-Luau-1f6feb)](https://luau-lang.org/)
 [![Docs](https://img.shields.io/badge/docs-DOCUMENTATION.md-1f6feb)](https://github.com/v1rtxz/Scrubber/blob/main/DOCUMENTATION.md)
-[![Setup](https://img.shields.io/badge/docs-DOCUMENTATION.md-1f6feb)](https://github.com/v1rtxz/Scrubber/blob/main/SETUP.md)
+[![Setup](https://img.shields.io/badge/setup-SETUP.md-1f6feb)](https://github.com/v1rtxz/Scrubber/blob/main/SETUP.md)
 
 
 </div>
