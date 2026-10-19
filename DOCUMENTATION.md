@@ -234,6 +234,3 @@ Scrubber is in early development, the source and this documentation are still be
 - **README:** [README.md](https://github.com/v1rtxz/Scrubber/blob/main/README.md)
 - **License:** [LICENSE](https://github.com/v1rtxz/Scrubber/blob/main/LICENSE)
 
-## Credits
-
-Made by **[Vortex](https://www.roblox.com/users/2816954293/profile)**.
