@@ -10,7 +10,6 @@ lifecycles across the server. It keeps track of things that need to be
 released later so you don't have to remember to do it yourself.
 Who even wants to do that lol.
 
-
 --------------------------------------------------------------------------------
 IMPORTANT NOTICE:
 --------------------------------------------------------------------------------
@@ -18,7 +17,7 @@ IMPORTANT NOTICE:
 Make sure to put this in ServerScriptService or somewhere safe, and the only
 way to use it is by requiring it with a server script.
 
-If you're not a professional at editing  code then I advise you to NOT try
+If you're not a professional at editing code then I advise you to NOT try
 doing so.
 
 If you are stuck, go onto the documentation docs in the links section.
@@ -73,50 +72,54 @@ LINKS:
 local Players = game:GetService("Players")
 local TaskScrubber = require(script.TaskScrubber)
 local ScopeRegistry = require(script.ScopeRegistry)
+local VersionTracker = require(script.VersionTracker)
+
 local ScrubberService = {}
 local GlobalScopes = ScopeRegistry.new()
 local isInitialized: boolean = false
-function ScrubberService.CreateScrubber(): any
+
+function ScrubberService.CreateScrubber(): TaskScrubber.TaskScrubber
 	return TaskScrubber.new()
 end
-function ScrubberService.GetScope(scopeId: string | number): any
+
+function ScrubberService.GetScope(scopeId: string | number): TaskScrubber.TaskScrubber
 	return GlobalScopes:GetScope(scopeId)
 end
+
 function ScrubberService.HasScope(scopeId: string | number): boolean
 	return GlobalScopes:HasScope(scopeId)
 end
+
 function ScrubberService.DestroyScope(scopeId: string | number)
 	GlobalScopes:DestroyScope(scopeId)
 end
-function ScrubberService.GetPlayerScope(player: Player): any
-	assert(typeof(player) == "Instance" and player:IsA("Player"), "[ScrubberService] Expected Player instance")
-	
-	if Players:GetPlayerByUserId(player.UserId :: any) ~= player then
-		warn("[ScrubberService] GetPlayerScope() called for '" .. player.Name .. "' after they already left. "
-			.. "This scope has no remaining auto-cleanup trigger - destroy it manually with DestroyScope, "
-			.. "or avoid calling GetPlayerScope from deferred/late code paths.")
-	end
 
-	return GlobalScopes:GetScope("Player_" .. tostring(player.UserId))
+function ScrubberService.GetPlayerScope(player: Player): TaskScrubber.TaskScrubber
+	return GlobalScopes:GetScope("Player_" .. player.UserId)
 end
+
 function ScrubberService.HasPlayerScope(player: Player): boolean
-	assert(typeof(player) == "Instance" and player:IsA("Player"), "[ScrubberService] Expected Player instance")
-	return GlobalScopes:HasScope("Player_" .. tostring(player.UserId))
+	return GlobalScopes:HasScope("Player_" .. player.UserId)
 end
+
 local function OnPlayerRemoving(player: Player)
-	ScrubberService.DestroyScope("Player_" .. tostring(player.UserId))
+	ScrubberService.DestroyScope("Player_" .. player.UserId)
 end
+
 function ScrubberService.Init()
 	if isInitialized then
-		warn("[ScrubberService] Init() has already been called. Ignoring duplicate request.")
 		return
 	end
 	isInitialized = true
+
 	Players.PlayerRemoving:Connect(OnPlayerRemoving)
 	for _, player in ipairs(Players:GetPlayers()) do
 		ScrubberService.GetPlayerScope(player)
 	end
+
+	VersionTracker.Run()
 end
 
 print("[ ScrubberService loaded ]")
+
 return ScrubberService
