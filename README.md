@@ -74,9 +74,7 @@ These are available on any scrubber or scope
 
 ## Status
 
-Scrubber is in early development, the source and the full documentation are still being written so nothing is final yet, when things are ready they'll live here
-
-For now check back later or open an issue if you have questions
+Scrubber is in beta development, things may be a bit broken still or a few fixes and new changes might come out there and there.
 
 ## Links
 
